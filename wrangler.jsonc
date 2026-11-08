@@ -1,0 +1,19 @@
+
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mafl-sevens",
+  "compatibility_date": "2026-11-04",
+  "main": "worker.js",
+  "assets": {
+    "directory": ".",
+    "binding": "ASSETS",
+    "run_worker_first": ["/admin/*", "/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mafl-sevens-admin",
+      "database_id": "d519c991-6ba3-4b88-a7ca-4dcca92f7282"
+    }
+  ]
+}
