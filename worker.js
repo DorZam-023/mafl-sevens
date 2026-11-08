@@ -10,7 +10,10 @@ const json = (data, status = 200) =>
 
 // Decode a Base64URL string.
 function decodeBase64Url(value) {
-  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+  const base64 = value
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+
   const padded = base64.padEnd(
     Math.ceil(base64.length / 4) * 4,
     "="
@@ -175,7 +178,16 @@ export default {
       // Temporary authentication diagnostics.
       try {
         await verifyAccess(request, env);
-      } catch {
+      } catch (error) {
+        // Log the reason internally.
+        // Never log the JWT or authentication cookies.
+        console.error(
+          "Access verification failed:",
+          error instanceof Error
+            ? error.message
+            : "Unknown verification error"
+        );
+
         const tokenPresent = Boolean(
           request.headers.get(
             "Cf-Access-Jwt-Assertion"
@@ -208,7 +220,14 @@ export default {
           database: "connected",
           publications: result?.total ?? 0
         });
-      } catch {
+      } catch (error) {
+        console.error(
+          "Database status check failed:",
+          error instanceof Error
+            ? error.message
+            : "Unknown database error"
+        );
+
         return json({
           status: "error",
           database: "unavailable"
