@@ -8,7 +8,7 @@ const json = (data, status = 200) =>
     }
   });
 
-// Decode a Base64URL string.
+// Decode Base64URL data.
 function decodeBase64Url(value) {
   const base64 = value
     .replace(/-/g, "+")
@@ -25,10 +25,12 @@ function decodeBase64Url(value) {
   );
 }
 
-// Decode JSON from a JWT component.
+// Decode a JWT JSON component.
 function decodeJson(value) {
   return JSON.parse(
-    new TextDecoder().decode(decodeBase64Url(value))
+    new TextDecoder().decode(
+      decodeBase64Url(value)
+    )
   );
 }
 
@@ -42,8 +44,13 @@ async function verifyAccess(request, env) {
     throw new Error("Missing Access token");
   }
 
-  const team = env.CF_ACCESS_TEAM_DOMAIN;
-  const audience = env.CF_ACCESS_AUD;
+  const team = String(
+    env.CF_ACCESS_TEAM_DOMAIN || ""
+  ).trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
+
+  const audience = String(
+    env.CF_ACCESS_AUD || ""
+  ).trim();
 
   if (
     !team ||
@@ -56,48 +63,86 @@ async function verifyAccess(request, env) {
   const parts = token.split(".");
 
   if (parts.length !== 3) {
-    throw new Error("Invalid token");
+    throw new Error("Invalid JWT format");
   }
 
   const header = decodeJson(parts[0]);
   const payload = decodeJson(parts[1]);
 
   if (header.alg !== "RS256" || !header.kid) {
-    throw new Error("Unsupported token");
+    throw new Error("Unsupported JWT algorithm or key ID");
   }
 
-  const now = Math.floor(Date.now() / 1000);
   const issuer = `https://${team}`;
+  const now = Math.floor(Date.now() / 1000);
 
+  // Check issuer.
+  if (payload.iss !== issuer) {
+    throw new Error("JWT issuer mismatch");
+  }
+
+  // Check application audience.
+  const audiences = Array.isArray(payload.aud)
+    ? payload.aud
+    : typeof payload.aud === "string"
+      ? [payload.aud]
+      : [];
+
+  if (!audiences.includes(audience)) {
+    throw new Error("JWT audience mismatch");
+  }
+
+  // Check expiration.
   if (
-    payload.iss !== issuer ||
-    !Array.isArray(payload.aud) ||
-    !payload.aud.includes(audience) ||
     typeof payload.exp !== "number" ||
-    payload.exp <= now ||
+    payload.exp <= now
+  ) {
+    throw new Error("JWT expired or missing expiration");
+  }
+
+  // Check issued-at time.
+  if (
     typeof payload.iat !== "number" ||
-    payload.iat > now + 60 ||
+    payload.iat > now + 60
+  ) {
+    throw new Error("JWT issued-at time invalid");
+  }
+
+  // Check not-before time.
+  if (
+    payload.nbf !== undefined &&
     (
-      payload.nbf !== undefined &&
-      (
-        typeof payload.nbf !== "number" ||
-        payload.nbf > now
-      )
+      typeof payload.nbf !== "number" ||
+      payload.nbf > now
     )
   ) {
-    throw new Error("Token claims invalid");
+    throw new Error("JWT not yet valid");
   }
 
-  // Retrieve Cloudflare's public signing keys.
-  const response = await fetch(
-    `${issuer}/cdn-cgi/access/certs`
-  );
+  // Retrieve Cloudflare public signing keys.
+  let response;
+
+  try {
+    response = await fetch(
+      `${issuer}/cdn-cgi/access/certs`
+    );
+  } catch {
+    throw new Error("Cannot connect to Access certificates endpoint");
+  }
 
   if (!response.ok) {
-    throw new Error("Cannot load signing keys");
+    throw new Error(
+      `Access certificates request failed: HTTP ${response.status}`
+    );
   }
 
-  const certificates = await response.json();
+  let certificates;
+
+  try {
+    certificates = await response.json();
+  } catch {
+    throw new Error("Invalid Access certificates response");
+  }
 
   const jwk = certificates.keys?.find(
     key =>
@@ -108,19 +153,25 @@ async function verifyAccess(request, env) {
   );
 
   if (!jwk) {
-    throw new Error("Signing key not found");
+    throw new Error("JWT signing key not found");
   }
 
-  const key = await crypto.subtle.importKey(
-    "jwk",
-    jwk,
-    {
-      name: "RSASSA-PKCS1-v1_5",
-      hash: "SHA-256"
-    },
-    false,
-    ["verify"]
-  );
+  let key;
+
+  try {
+    key = await crypto.subtle.importKey(
+      "jwk",
+      jwk,
+      {
+        name: "RSASSA-PKCS1-v1_5",
+        hash: "SHA-256"
+      },
+      false,
+      ["verify"]
+    );
+  } catch {
+    throw new Error("Unable to import JWT signing key");
+  }
 
   const signedData = new TextEncoder().encode(
     `${parts[0]}.${parts[1]}`
@@ -134,7 +185,7 @@ async function verifyAccess(request, env) {
   );
 
   if (!valid) {
-    throw new Error("Invalid signature");
+    throw new Error("JWT signature verification failed");
   }
 
   return payload;
@@ -159,7 +210,14 @@ export default {
               ? "connected"
               : "unavailable"
         });
-      } catch {
+      } catch (error) {
+        console.error(
+          "Database health check failed:",
+          error instanceof Error
+            ? error.message
+            : "Unknown database error"
+        );
+
         return json({
           status: "error",
           database: "unavailable"
@@ -175,38 +233,25 @@ export default {
         }, 405);
       }
 
-      // Temporary authentication diagnostics.
+      // Authenticate administrator.
       try {
         await verifyAccess(request, env);
       } catch (error) {
-        // Log the reason internally.
-        // Never log the JWT or authentication cookies.
+        // Log only the verification failure reason.
+        // Never log tokens, cookies or full JWT payloads.
         console.error(
-          "Access verification failed:",
+          "MAFL ACCESS AUTH ERROR:",
           error instanceof Error
             ? error.message
-            : "Unknown verification error"
-        );
-
-        const tokenPresent = Boolean(
-          request.headers.get(
-            "Cf-Access-Jwt-Assertion"
-          )
-        );
-
-        const configurationPresent = Boolean(
-          env.CF_ACCESS_AUD &&
-          env.CF_ACCESS_TEAM_DOMAIN
+            : "Unknown authentication error"
         );
 
         return json({
-          error: "Unauthorized",
-          tokenReceived: tokenPresent,
-          configurationPresent: configurationPresent
+          error: "Unauthorized"
         }, 401);
       }
 
-      // Verify publication table exists.
+      // Check publication storage.
       try {
         const result = await env.DB
           .prepare(
@@ -222,7 +267,7 @@ export default {
         });
       } catch (error) {
         console.error(
-          "Database status check failed:",
+          "MAFL DATABASE ERROR:",
           error instanceof Error
             ? error.message
             : "Unknown database error"
@@ -242,7 +287,7 @@ export default {
       }, 404);
     }
 
-    // Preserve existing static asset routing.
+    // Preserve static website and dashboard files.
     return env.ASSETS.fetch(request);
   }
 };
