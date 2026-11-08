@@ -1,7 +1,7 @@
 
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "mafl-sevens",
+  "name": "admin-mafl-sevens",
   "compatibility_date": "2026-11-04",
   "main": "worker.js",
   "assets": {
