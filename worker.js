@@ -86,34 +86,14 @@ async function verifyAccess(request, env) {
     throw new Error("JWT issuer mismatch");
   }
 
-  // Read application audiences.
+  // Check application audience.
   const audiences = Array.isArray(payload.aud)
     ? payload.aud
     : typeof payload.aud === "string"
       ? [payload.aud]
       : [];
 
-  // TEMPORARY DIAGNOSTIC:
-  // Log the actual audience identifier when it
-  // does not match the configured application AUD.
-  //
-  // The JWT is still rejected on mismatch.
-  // Remove this diagnostic after fixing the AUD.
   if (!audiences.includes(audience)) {
-    console.error("MAFL ACTUAL AUD:", audiences);
-
-    console.error("MAFL AUD DIAGNOSTIC:", {
-      audienceMatches: false,
-      tokenAudienceCount: audiences.length,
-      configuredAudienceLength: audience.length,
-      tokenAudienceLengths: audiences.map(
-        value =>
-          typeof value === "string"
-            ? value.length
-            : null
-      )
-    });
-
     throw new Error("JWT audience mismatch");
   }
 
