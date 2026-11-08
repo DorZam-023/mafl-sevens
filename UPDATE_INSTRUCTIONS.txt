@@ -1,0 +1,11 @@
+MAFL SEVENS - TEAM LOGOS UPDATE
+
+1. Extract this ZIP.
+2. Open your GitHub repository mafl-sevens.
+3. Upload index.html, app.js, styles.css and the entire assets/teams folder, preserving folder paths.
+4. Commit changes. Your connected Cloudflare Worker should redeploy.
+5. Refresh the website with Ctrl+Shift+R.
+
+The ZIP also contains the existing league.json, MAFL crest and README to make a complete website copy. Existing league data has not been changed.
+
+IMPORTANT: For GitHub web upload, drag the contents of this ZIP (including assets and data folders) onto the repository upload screen, rather than uploading the ZIP file itself.
