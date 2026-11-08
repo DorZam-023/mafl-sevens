@@ -25,7 +25,7 @@ function decodeBase64Url(value) {
   );
 }
 
-// Decode a JWT JSON component.
+// Decode JSON from a JWT component.
 function decodeJson(value) {
   return JSON.parse(
     new TextDecoder().decode(
@@ -86,16 +86,22 @@ async function verifyAccess(request, env) {
     throw new Error("JWT issuer mismatch");
   }
 
-  // Check application audience.
+  // Read application audiences.
   const audiences = Array.isArray(payload.aud)
     ? payload.aud
     : typeof payload.aud === "string"
       ? [payload.aud]
       : [];
 
-  // Temporary audience diagnostics.
-  // Do not log the JWT or actual audience values.
+  // TEMPORARY DIAGNOSTIC:
+  // Log the actual audience identifier when it
+  // does not match the configured application AUD.
+  //
+  // The JWT is still rejected on mismatch.
+  // Remove this diagnostic after fixing the AUD.
   if (!audiences.includes(audience)) {
+    console.error("MAFL ACTUAL AUD:", audiences);
+
     console.error("MAFL AUD DIAGNOSTIC:", {
       audienceMatches: false,
       tokenAudienceCount: audiences.length,
@@ -268,7 +274,6 @@ export default {
       try {
         await verifyAccess(request, env);
       } catch (error) {
-        // Log the error reason internally.
         // Never log JWTs or authentication cookies.
         console.error(
           "MAFL ACCESS AUTH ERROR:",
