@@ -46,7 +46,10 @@ async function verifyAccess(request, env) {
 
   const team = String(
     env.CF_ACCESS_TEAM_DOMAIN || ""
-  ).trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
+  )
+    .trim()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/$/, "");
 
   const audience = String(
     env.CF_ACCESS_AUD || ""
@@ -70,7 +73,9 @@ async function verifyAccess(request, env) {
   const payload = decodeJson(parts[1]);
 
   if (header.alg !== "RS256" || !header.kid) {
-    throw new Error("Unsupported JWT algorithm or key ID");
+    throw new Error(
+      "Unsupported JWT algorithm or key ID"
+    );
   }
 
   const issuer = `https://${team}`;
@@ -88,7 +93,21 @@ async function verifyAccess(request, env) {
       ? [payload.aud]
       : [];
 
+  // Temporary audience diagnostics.
+  // Do not log the JWT or actual audience values.
   if (!audiences.includes(audience)) {
+    console.error("MAFL AUD DIAGNOSTIC:", {
+      audienceMatches: false,
+      tokenAudienceCount: audiences.length,
+      configuredAudienceLength: audience.length,
+      tokenAudienceLengths: audiences.map(
+        value =>
+          typeof value === "string"
+            ? value.length
+            : null
+      )
+    });
+
     throw new Error("JWT audience mismatch");
   }
 
@@ -97,7 +116,9 @@ async function verifyAccess(request, env) {
     typeof payload.exp !== "number" ||
     payload.exp <= now
   ) {
-    throw new Error("JWT expired or missing expiration");
+    throw new Error(
+      "JWT expired or missing expiration"
+    );
   }
 
   // Check issued-at time.
@@ -127,7 +148,9 @@ async function verifyAccess(request, env) {
       `${issuer}/cdn-cgi/access/certs`
     );
   } catch {
-    throw new Error("Cannot connect to Access certificates endpoint");
+    throw new Error(
+      "Cannot connect to Access certificates endpoint"
+    );
   }
 
   if (!response.ok) {
@@ -141,7 +164,9 @@ async function verifyAccess(request, env) {
   try {
     certificates = await response.json();
   } catch {
-    throw new Error("Invalid Access certificates response");
+    throw new Error(
+      "Invalid Access certificates response"
+    );
   }
 
   const jwk = certificates.keys?.find(
@@ -153,7 +178,9 @@ async function verifyAccess(request, env) {
   );
 
   if (!jwk) {
-    throw new Error("JWT signing key not found");
+    throw new Error(
+      "JWT signing key not found"
+    );
   }
 
   let key;
@@ -170,7 +197,9 @@ async function verifyAccess(request, env) {
       ["verify"]
     );
   } catch {
-    throw new Error("Unable to import JWT signing key");
+    throw new Error(
+      "Unable to import JWT signing key"
+    );
   }
 
   const signedData = new TextEncoder().encode(
@@ -185,7 +214,9 @@ async function verifyAccess(request, env) {
   );
 
   if (!valid) {
-    throw new Error("JWT signature verification failed");
+    throw new Error(
+      "JWT signature verification failed"
+    );
   }
 
   return payload;
@@ -237,8 +268,8 @@ export default {
       try {
         await verifyAccess(request, env);
       } catch (error) {
-        // Log only the verification failure reason.
-        // Never log tokens, cookies or full JWT payloads.
+        // Log the error reason internally.
+        // Never log JWTs or authentication cookies.
         console.error(
           "MAFL ACCESS AUTH ERROR:",
           error instanceof Error
@@ -287,7 +318,7 @@ export default {
       }, 404);
     }
 
-    // Preserve static website and dashboard files.
+    // Preserve existing static website and dashboard.
     return env.ASSETS.fetch(request);
   }
 };
