@@ -39,3 +39,4 @@ Cloudflare's interface and free-plan allowances may change. Review the current d
 
 ## Next phase
 Build the Excel importer with validation, preview, and stable-ID upsert; add Cloudflare D1 storage and private admin login; support uploaded logos and player photos; verify discipline rules and assist tracking.
+Admin deployment test
