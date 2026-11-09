@@ -89,9 +89,7 @@ async function verifyAccess(request, env) {
     ? payload.aud
     : [payload.aud];
 
-  // Validate JWT claims.
-  if (
-    p// Validate JWT claims with safe diagnostics.
+ // Validate JWT claims with safe diagnostics.
 const claimChecks = {
   issuerMatches: payload.iss === issuer,
   audienceMatches: audiences.includes(audience),
