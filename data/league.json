@@ -2901,6 +2901,56 @@
       "Active": "Yes",
       "PhotoFileName": null,
       "Notes": null
+    },
+    {
+      "PlayerID": "P00279",
+      "TeamID": "T002",
+      "ShirtNumber": null,
+      "PlayerName": "Neil Pisani",
+      "Position": "Outfield",
+      "Active": "Yes",
+      "PhotoFileName": null,
+      "Notes": null
+    },
+    {
+      "PlayerID": "P00280",
+      "TeamID": "T010",
+      "ShirtNumber": null,
+      "PlayerName": "Chris Farrugia",
+      "Position": "Outfield",
+      "Active": "Yes",
+      "PhotoFileName": null,
+      "Notes": null
+    },
+    {
+      "PlayerID": "P00281",
+      "TeamID": "T010",
+      "ShirtNumber": null,
+      "PlayerName": "Solomon Andera Mudimo Kurumi",
+      "Position": "Outfield",
+      "Active": "Yes",
+      "PhotoFileName": null,
+      "Notes": null
+    },
+    {
+      "PlayerID": "P00282",
+      "TeamID": "T009",
+      "ShirtNumber": null,
+      "PlayerName": "Zachary James Farrugia",
+      "Position": "GK",
+      "Active": "Yes",
+      "PhotoFileName": null,
+      "Notes": null
+    },
+    {
+      "PlayerID": "P00283",
+      "TeamID": "T012",
+      "ShirtNumber": null,
+      "PlayerName": "Anoop Kochumon",
+      "Position": "Outfield",
+      "Active": "Yes",
+      "PhotoFileName": null,
+      "Notes": null
     }
   ],
   "competitions": [
