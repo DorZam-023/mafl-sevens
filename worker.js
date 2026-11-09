@@ -1,12 +1,16 @@
 
-const json = (data, status = 200) =>
+const json = (data, status = 200, extraHeaders = {}) =>
   Response.json(data, {
     status,
     headers: {
       "Cache-Control": "no-store",
-      "X-Content-Type-Options": "nosniff"
+      "X-Content-Type-Options": "nosniff",
+      ...extraHeaders
     }
   });
+
+const fail = (message, status) =>
+  json({ error: message }, status);
 
 // Decode Base64URL data.
 function decodeBase64Url(value) {
@@ -14,18 +18,18 @@ function decodeBase64Url(value) {
     .replace(/-/g, "+")
     .replace(/_/g, "/");
 
-  const padded = base64.padEnd(
-    Math.ceil(base64.length / 4) * 4,
-    "="
-  );
-
   return Uint8Array.from(
-    atob(padded),
+    atob(
+      base64.padEnd(
+        Math.ceil(base64.length / 4) * 4,
+        "="
+      )
+    ),
     c => c.charCodeAt(0)
   );
 }
 
-// Decode JSON from a JWT component.
+// Decode a JWT JSON component.
 function decodeJson(value) {
   return JSON.parse(
     new TextDecoder().decode(
@@ -34,7 +38,7 @@ function decodeJson(value) {
   );
 }
 
-// Verify Cloudflare Access JWT.
+// Verify Cloudflare Access authentication.
 async function verifyAccess(request, env) {
   const token = request.headers.get(
     "Cf-Access-Jwt-Assertion"
@@ -56,7 +60,6 @@ async function verifyAccess(request, env) {
   ).trim();
 
   if (
-    !team ||
     !audience ||
     !/^[a-z0-9-]+\.cloudflareaccess\.com$/.test(team)
   ) {
@@ -72,149 +75,154 @@ async function verifyAccess(request, env) {
   const header = decodeJson(parts[0]);
   const payload = decodeJson(parts[1]);
 
-  if (header.alg !== "RS256" || !header.kid) {
-    throw new Error(
-      "Unsupported JWT algorithm or key ID"
-    );
+  if (
+    header.alg !== "RS256" ||
+    typeof header.kid !== "string"
+  ) {
+    throw new Error("Unsupported JWT");
   }
 
-  const issuer = `https://${team}`;
   const now = Math.floor(Date.now() / 1000);
+  const issuer = `https://${team}`;
 
-  // Check issuer.
-  if (payload.iss !== issuer) {
-    throw new Error("JWT issuer mismatch");
-  }
-
-  // Check application audience.
   const audiences = Array.isArray(payload.aud)
     ? payload.aud
-    : typeof payload.aud === "string"
-      ? [payload.aud]
-      : [];
+    : [payload.aud];
 
-  if (!audiences.includes(audience)) {
-    throw new Error("JWT audience mismatch");
-  }
-
-  // Check expiration.
+  // Validate JWT claims.
   if (
-    typeof payload.exp !== "number" ||
-    payload.exp <= now
-  ) {
-    throw new Error(
-      "JWT expired or missing expiration"
-    );
-  }
-
-  // Check issued-at time.
-  if (
-    typeof payload.iat !== "number" ||
-    payload.iat > now + 60
-  ) {
-    throw new Error("JWT issued-at time invalid");
-  }
-
-  // Check not-before time.
-  if (
-    payload.nbf !== undefined &&
+    payload.iss !== issuer ||
+    !audiences.includes(audience) ||
+    !Number.isFinite(payload.exp) ||
+    payload.exp <= now ||
+    !Number.isFinite(payload.iat) ||
+    payload.iat > now + 60 ||
     (
-      typeof payload.nbf !== "number" ||
-      payload.nbf > now
+      payload.nbf !== undefined &&
+      (
+        !Number.isFinite(payload.nbf) ||
+        payload.nbf > now
+      )
     )
   ) {
-    throw new Error("JWT not yet valid");
+    throw new Error("JWT claims invalid");
   }
 
-  // Retrieve Cloudflare public signing keys.
-  let response;
-
-  try {
-    response = await fetch(
-      `${issuer}/cdn-cgi/access/certs`
-    );
-  } catch {
-    throw new Error(
-      "Cannot connect to Access certificates endpoint"
-    );
-  }
+  // Retrieve Cloudflare signing keys.
+  const response = await fetch(
+    `${issuer}/cdn-cgi/access/certs`
+  );
 
   if (!response.ok) {
-    throw new Error(
-      `Access certificates request failed: HTTP ${response.status}`
-    );
+    throw new Error("Signing keys unavailable");
   }
 
-  let certificates;
+  const certs = await response.json();
 
-  try {
-    certificates = await response.json();
-  } catch {
-    throw new Error(
-      "Invalid Access certificates response"
-    );
-  }
-
-  const jwk = certificates.keys?.find(
-    key =>
-      key.kid === header.kid &&
-      key.kty === "RSA" &&
-      (!key.alg || key.alg === "RS256") &&
-      (!key.use || key.use === "sig")
+  const jwk = certs.keys?.find(
+    k =>
+      k.kid === header.kid &&
+      k.kty === "RSA" &&
+      (!k.alg || k.alg === "RS256") &&
+      (!k.use || k.use === "sig")
   );
 
   if (!jwk) {
-    throw new Error(
-      "JWT signing key not found"
-    );
+    throw new Error("Signing key not found");
   }
 
-  let key;
-
-  try {
-    key = await crypto.subtle.importKey(
-      "jwk",
-      jwk,
-      {
-        name: "RSASSA-PKCS1-v1_5",
-        hash: "SHA-256"
-      },
-      false,
-      ["verify"]
-    );
-  } catch {
-    throw new Error(
-      "Unable to import JWT signing key"
-    );
-  }
-
-  const signedData = new TextEncoder().encode(
-    `${parts[0]}.${parts[1]}`
+  const key = await crypto.subtle.importKey(
+    "jwk",
+    jwk,
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      hash: "SHA-256"
+    },
+    false,
+    ["verify"]
   );
 
   const valid = await crypto.subtle.verify(
     "RSASSA-PKCS1-v1_5",
     key,
     decodeBase64Url(parts[2]),
-    signedData
+    new TextEncoder().encode(
+      `${parts[0]}.${parts[1]}`
+    )
   );
 
   if (!valid) {
-    throw new Error(
-      "JWT signature verification failed"
-    );
+    throw new Error("JWT signature invalid");
   }
 
   return payload;
 }
 
-// Cloudflare Worker.
+// Validate imported league data.
+function validateLeague(data) {
+  if (
+    !data ||
+    typeof data !== "object" ||
+    Array.isArray(data)
+  ) {
+    throw new Error("Expected a JSON object");
+  }
+
+  const fields = [
+    "teams",
+    "players",
+    "competitions",
+    "fixtures"
+  ];
+
+  for (const field of fields) {
+    if (!Array.isArray(data[field])) {
+      throw new Error(`Missing array: ${field}`);
+    }
+  }
+
+  const performances =
+    Array.isArray(data.matchPerformance)
+      ? data.matchPerformance
+      : Array.isArray(data.match_performance)
+        ? data.match_performance
+        : null;
+
+  const counts = {
+    teams: data.teams.length,
+    players: data.players.length,
+    competitions: data.competitions.length,
+    fixtures: data.fixtures.length,
+    performances: performances?.length ?? 0
+  };
+
+  if (!counts.teams || !counts.competitions) {
+    throw new Error(
+      "Teams and competitions cannot be empty"
+    );
+  }
+
+  return counts;
+}
+
+// Maximum JSON upload size: 8 MB.
+const MAX_JSON_BYTES = 8 * 1024 * 1024;
+
+// Main Cloudflare Worker.
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const path = url.pathname;
 
-    // Database health check.
-    if (url.pathname === "/api/health") {
+    // --------------------------------
+    // DATABASE HEALTH CHECK
+    // --------------------------------
+
+    if (path === "/api/health") {
+      if (request.method !== "GET") {
+        return fail("Method not allowed", 405);
+      }
+
       try {
         const result = await env.DB
           .prepare("SELECT 1 AS connected")
@@ -229,10 +237,8 @@ export default {
         });
       } catch (error) {
         console.error(
-          "Database health check failed:",
-          error instanceof Error
-            ? error.message
-            : "Unknown database error"
+          "Health check failed:",
+          error.message
         );
 
         return json({
@@ -242,68 +248,281 @@ export default {
       }
     }
 
-    // Protected administrator status endpoint.
-    if (url.pathname === "/api/admin/status") {
+    // --------------------------------
+    // PUBLIC LEAGUE DATA
+    // --------------------------------
+
+    if (path === "/api/public/league") {
       if (request.method !== "GET") {
-        return json({
-          error: "Method not allowed"
-        }, 405);
+        return fail("Method not allowed", 405);
       }
 
-      // Authenticate administrator.
+      try {
+        const result = await env.DB.prepare(
+          "SELECT data_json, published_at " +
+          "FROM league_publications " +
+          "WHERE status = 'published' " +
+          "ORDER BY published_at DESC, id DESC " +
+          "LIMIT 1"
+        ).first();
+
+        if (!result) {
+          return fail(
+            "No published league data yet",
+            404
+          );
+        }
+
+        return json({
+          publishedAt: result.published_at,
+          league: JSON.parse(result.data_json)
+        });
+      } catch (error) {
+        console.error(
+          "Public league retrieval failed:",
+          error.message
+        );
+
+        return fail(
+          "Database unavailable",
+          503
+        );
+      }
+    }
+
+    // --------------------------------
+    // PROTECTED ADMIN API
+    // --------------------------------
+
+    if (path.startsWith("/api/admin/")) {
+      if (
+        !["GET", "POST"].includes(request.method)
+      ) {
+        return fail(
+          "Method not allowed",
+          405
+        );
+      }
+
+      // Authenticate the administrator.
       try {
         await verifyAccess(request, env);
       } catch (error) {
-        // Never log JWTs or authentication cookies.
         console.error(
           "MAFL ACCESS AUTH ERROR:",
           error instanceof Error
             ? error.message
-            : "Unknown authentication error"
+            : "Unknown error"
         );
 
-        return json({
-          error: "Unauthorized"
-        }, 401);
+        return fail("Unauthorized", 401);
       }
 
-      // Check publication storage.
-      try {
-        const result = await env.DB
-          .prepare(
-            "SELECT COUNT(*) AS total FROM league_publications"
+      // --------------------------------
+      // ADMIN STATUS
+      // --------------------------------
+
+      if (
+        path === "/api/admin/status" &&
+        request.method === "GET"
+      ) {
+        try {
+          const result = await env.DB.prepare(
+            "SELECT COUNT(*) AS total " +
+            "FROM league_publications"
+          ).first();
+
+          return json({
+            status: "ready",
+            authenticated: true,
+            database: "connected",
+            publications: result?.total ?? 0
+          });
+        } catch (error) {
+          console.error(
+            "Status query failed:",
+            error.message
+          );
+
+          return fail(
+            "Database unavailable",
+            503
+          );
+        }
+      }
+
+      // --------------------------------
+      // UPLOAD LEAGUE JSON AS DRAFT
+      // --------------------------------
+
+      if (
+        path === "/api/admin/publications" &&
+        request.method === "POST"
+      ) {
+        const contentType =
+          request.headers.get("content-type") || "";
+
+        if (
+          !/^application\/json(?:\s*;|\s*$)/i.test(
+            contentType
           )
-          .first();
+        ) {
+          return fail(
+            "Content-Type must be application/json",
+            415
+          );
+        }
 
-        return json({
-          status: "ready",
-          authenticated: true,
-          database: "connected",
-          publications: result?.total ?? 0
-        });
-      } catch (error) {
-        console.error(
-          "MAFL DATABASE ERROR:",
-          error instanceof Error
-            ? error.message
-            : "Unknown database error"
+        const length = Number(
+          request.headers.get("content-length") || 0
         );
 
-        return json({
-          status: "error",
-          database: "unavailable"
-        }, 503);
+        if (length > MAX_JSON_BYTES) {
+          return fail(
+            "JSON file is too large (8 MB limit)",
+            413
+          );
+        }
+
+        let body;
+
+        try {
+          const raw = await request.text();
+
+          if (
+            new TextEncoder().encode(raw).length >
+            MAX_JSON_BYTES
+          ) {
+            return fail(
+              "JSON file is too large (8 MB limit)",
+              413
+            );
+          }
+
+          body = JSON.parse(raw);
+        } catch {
+          return fail(
+            "Invalid JSON body",
+            400
+          );
+        }
+
+        let counts;
+
+        try {
+          counts = validateLeague(body);
+        } catch (error) {
+          return fail(
+            error.message,
+            400
+          );
+        }
+
+        try {
+          const result = await env.DB.prepare(
+            "INSERT INTO league_publications " +
+            "(status, data_json, source_filename, " +
+            "record_counts_json) " +
+            "VALUES ('draft', ?, ?, ?)"
+          )
+            .bind(
+              JSON.stringify(body),
+              "league.json",
+              JSON.stringify(counts)
+            )
+            .run();
+
+          return json({
+            status: "draft",
+            id: result.meta.last_row_id,
+            recordCounts: counts
+          }, 201);
+        } catch (error) {
+          console.error(
+            "Draft insert failed:",
+            error.message
+          );
+
+          return fail(
+            "Could not save draft",
+            503
+          );
+        }
       }
+
+      // --------------------------------
+      // PUBLISH A SAVED DRAFT
+      // --------------------------------
+
+      const match = path.match(
+        /^\/api\/admin\/publications\/(\d+)\/publish$/
+      );
+
+      if (
+        match &&
+        request.method === "POST"
+      ) {
+        const id = Number(match[1]);
+
+        if (
+          !Number.isSafeInteger(id) ||
+          id < 1
+        ) {
+          return fail(
+            "Invalid publication ID",
+            400
+          );
+        }
+
+        try {
+          const result = await env.DB.prepare(
+            "UPDATE league_publications " +
+            "SET status = 'published', " +
+            "published_at = CURRENT_TIMESTAMP " +
+            "WHERE id = ? AND status = 'draft'"
+          )
+            .bind(id)
+            .run();
+
+          if (result.meta.changes !== 1) {
+            return fail(
+              "Draft not found or already published",
+              404
+            );
+          }
+
+          return json({
+            status: "published",
+            id
+          });
+        } catch (error) {
+          console.error(
+            "Publish failed:",
+            error.message
+          );
+
+          return fail(
+            "Could not publish draft",
+            503
+          );
+        }
+      }
+
+      return fail("Not found", 404);
     }
 
-    // Reject unknown API routes.
-    if (url.pathname.startsWith("/api/")) {
-      return json({
-        error: "Not found"
-      }, 404);
+    // --------------------------------
+    // UNKNOWN API ROUTES
+    // --------------------------------
+
+    if (path.startsWith("/api/")) {
+      return fail("Not found", 404);
     }
 
-    // Preserve existing static website and dashboard.
+    // --------------------------------
+    // STATIC WEBSITE / ADMIN DASHBOARD
+    // --------------------------------
+
     return env.ASSETS.fetch(request);
   }
 };
