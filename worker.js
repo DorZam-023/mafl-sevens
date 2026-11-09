@@ -91,22 +91,28 @@ async function verifyAccess(request, env) {
 
   // Validate JWT claims.
   if (
-    payload.iss !== issuer ||
-    !audiences.includes(audience) ||
-    !Number.isFinite(payload.exp) ||
-    payload.exp <= now ||
-    !Number.isFinite(payload.iat) ||
-    payload.iat > now + 60 ||
+    p// Validate JWT claims with safe diagnostics.
+const claimChecks = {
+  issuerMatches: payload.iss === issuer,
+  audienceMatches: audiences.includes(audience),
+  expirationValid:
+    Number.isFinite(payload.exp) &&
+    payload.exp > now,
+  issuedAtValid:
+    Number.isFinite(payload.iat) &&
+    payload.iat <= now + 60,
+  notBeforeValid:
+    payload.nbf === undefined ||
     (
-      payload.nbf !== undefined &&
-      (
-        !Number.isFinite(payload.nbf) ||
-        payload.nbf > now
-      )
+      Number.isFinite(payload.nbf) &&
+      payload.nbf <= now
     )
-  ) {
-    throw new Error("JWT claims invalid");
-  }
+};
+
+if (Object.values(claimChecks).some(value => !value)) {
+  console.error("MAFL JWT CLAIM CHECK:", claimChecks);
+  throw new Error("JWT claims invalid");
+}
 
   // Retrieve Cloudflare signing keys.
   const response = await fetch(
