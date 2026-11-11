@@ -186,11 +186,13 @@ function validateLeague(data) {
   }
 
   const performances =
-    Array.isArray(data.matchPerformance)
-      ? data.matchPerformance
-      : Array.isArray(data.match_performance)
-        ? data.match_performance
-        : null;
+    Array.isArray(data.performances)
+      ? data.performances
+      : Array.isArray(data.matchPerformance)
+        ? data.matchPerformance
+        : Array.isArray(data.match_performance)
+          ? data.match_performance
+          : null;
 
   const counts = {
     teams: data.teams.length,
