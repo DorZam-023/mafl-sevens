@@ -5,7 +5,7 @@
   "compatibility_date": "2026-11-04",
   "main": "worker.js",
 "vars": {
-  "CF_ACCESS_AUD": "737646a56ab1df6ec9bddc7e5ca84eaf3b0768850f3ffb5d74f1534911fe3893",
+  "CF_ACCESS_AUD": "c1f3649bfeed923dd02e2d11337e3709c5df21940a11c9dac9797f7f85514184",
   "CF_ACCESS_TEAM_DOMAIN": "dry-sun-156b.cloudflareaccess.com"
 },
   "assets": {
